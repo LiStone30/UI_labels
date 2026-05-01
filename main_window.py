@@ -1,0 +1,425 @@
+# -*- coding: utf-8 -*-
+"""主窗口：UI逆向标注工具"""
+
+import json
+from typing import Optional
+
+from PySide6.QtCore import Qt, QModelIndex
+from PySide6.QtGui import QAction, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QGraphicsView,
+    QDockWidget,
+    QTreeView,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QGroupBox,
+    QListWidget,
+    QListWidgetItem,
+    QFormLayout,
+    QLineEdit,
+    QComboBox,
+    QDoubleSpinBox,
+    QPushButton,
+    QLabel,
+    QFileDialog,
+    QMessageBox,
+    QInputDialog,
+    QToolBar,
+    QStatusBar,
+)
+
+
+from models import UIWidgetNode, template_manager, TemplateManager, Template
+from graphics import ImageScene, ResizableRectItem
+from tree_model import WidgetTreeModel
+
+
+class MainWindow(QMainWindow):
+    """UI逆向标注工具主窗口"""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("UI逆向标注工具")
+        self.resize(1200, 800)
+
+        # 数据
+        self.current_image_path: Optional[str] = None
+        self.ui_tree_root = UIWidgetNode("Root", "", (0, 0, 1, 1))  # 根节点不可见
+        self.tree_model = WidgetTreeModel(self.ui_tree_root)
+        self.current_filter_depth: Optional[int] = None  # None表示全部
+
+        self.init_ui()
+        self.connect_signals()
+
+    # ---------- UI 初始化 ----------
+
+    def init_ui(self):
+        """构建所有UI组件"""
+        # ---- 中心：图形视图 ----
+        self.scene = ImageScene(self)
+        self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.Antialiasing)
+        self.view.setDragMode(QGraphicsView.RubberBandDrag)
+        self.setCentralWidget(self.view)
+
+        # ---- 文件工具栏 ----
+        file_toolbar = self.addToolBar("文件")
+        open_action = QAction("打开图片", self)
+        open_action.triggered.connect(self.open_image)
+        file_toolbar.addAction(open_action)
+
+        save_action = QAction("保存结构", self)
+        save_action.triggered.connect(self.save_structure)
+        file_toolbar.addAction(save_action)
+
+        load_action = QAction("加载结构", self)
+        load_action.triggered.connect(self.load_structure)
+        file_toolbar.addAction(load_action)
+
+        # ---- 右侧：UI结构树 ----
+        right_dock = QDockWidget("UI结构树", self)
+        self.tree_view = QTreeView()
+        self.tree_view.setModel(self.tree_model)
+        self.tree_view.setHeaderHidden(False)
+        self.tree_view.setDragEnabled(True)
+        self.tree_view.setAcceptDrops(True)
+        self.tree_view.setDropIndicatorShown(True)
+        self.tree_view.setDragDropMode(QTreeView.InternalMove)
+        right_dock.setWidget(self.tree_view)
+        self.addDockWidget(Qt.RightDockWidgetArea, right_dock)
+
+        # ---- 底部：模板列表 + 属性编辑 ----
+        bottom_widget = QWidget()
+        bottom_layout = QHBoxLayout(bottom_widget)
+
+        # 模板列表
+        template_group = QGroupBox("控件模板")
+        template_layout = QVBoxLayout()
+        self.template_list = QListWidget()
+        for t in template_manager.get_all():
+            item = QListWidgetItem(t.display_name)
+            item.setData(Qt.UserRole, t.id)
+            self.template_list.addItem(item)
+        template_layout.addWidget(self.template_list)
+        template_group.setLayout(template_layout)
+
+        # 属性编辑
+        prop_group = QGroupBox("属性")
+        prop_layout = QFormLayout()
+
+        self.prop_name_edit = QLineEdit()
+        self.prop_name_edit.setPlaceholderText("控件名称")
+        prop_layout.addRow("名称:", self.prop_name_edit)
+
+        self.prop_template_combo = QComboBox()
+        for t in template_manager.get_all():
+            self.prop_template_combo.addItem(t.display_name, t.id)
+        prop_layout.addRow("模板:", self.prop_template_combo)
+
+        self.prop_x = QDoubleSpinBox()
+        self.prop_x.setRange(0, 1)
+        self.prop_x.setSingleStep(0.01)
+        self.prop_y = QDoubleSpinBox()
+        self.prop_y.setRange(0, 1)
+        self.prop_y.setSingleStep(0.01)
+        self.prop_w = QDoubleSpinBox()
+        self.prop_w.setRange(0, 1)
+        self.prop_w.setSingleStep(0.01)
+        self.prop_h = QDoubleSpinBox()
+        self.prop_h.setRange(0, 1)
+        self.prop_h.setSingleStep(0.01)
+        prop_layout.addRow("x:", self.prop_x)
+        prop_layout.addRow("y:", self.prop_y)
+        prop_layout.addRow("w:", self.prop_w)
+        prop_layout.addRow("h:", self.prop_h)
+
+        self.update_prop_btn = QPushButton("更新")
+        prop_layout.addRow(self.update_prop_btn)
+
+        prop_group.setLayout(prop_layout)
+
+        bottom_layout.addWidget(template_group)
+        bottom_layout.addWidget(prop_group)
+
+        # 使用状态栏，但不覆盖底部dock，用setStatusBar替代
+        # 这里我们将bottom_widget放到一个dock中
+        bottom_dock = QDockWidget("控件编辑", self)
+        bottom_dock.setWidget(bottom_widget)
+        self.addDockWidget(Qt.BottomDockWidgetArea, bottom_dock)
+
+        # ---- 层级控制工具栏 ----
+        level_toolbar = self.addToolBar("层级")
+        self.level_filter_btn = QPushButton("只显示当前层级")
+        level_toolbar.addWidget(self.level_filter_btn)
+        self.level_up_btn = QPushButton("上一层级")
+        level_toolbar.addWidget(self.level_up_btn)
+        self.level_reset_btn = QPushButton("显示全部")
+        level_toolbar.addWidget(self.level_reset_btn)
+
+        # 状态栏
+        status_bar = QStatusBar()
+        status_bar.showMessage("就绪")
+        self.setStatusBar(status_bar)
+
+
+        # 辅助变量
+        self.current_drawing_bbox = None
+
+    def connect_signals(self):
+        """连接信号与槽"""
+        self.tree_view.selectionModel().selectionChanged.connect(self.on_node_selected)
+        self.update_prop_btn.clicked.connect(self.update_current_node)
+        self.level_filter_btn.clicked.connect(self.show_only_current_level)
+        self.level_up_btn.clicked.connect(self.go_up_one_level)
+        self.level_reset_btn.clicked.connect(self.reset_level_filter)
+        self.scene.node_updated_callback = self.on_node_updated
+
+    # ---------- 图片操作 ----------
+
+    def open_image(self):
+        """打开并显示图片"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "打开图片", "", "Images (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if not path:
+            return
+        self.current_image_path = path
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            QMessageBox.warning(self, "错误", "无法加载图片")
+            return
+        self.scene.setImage(pixmap)
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.rebuild_scene_rects()
+
+    def rebuild_scene_rects(self):
+        """根据当前树重新生成所有矩形项"""
+        for rect_item in self.scene.rect_items.values():
+            self.scene.removeItem(rect_item)
+        self.scene.rect_items.clear()
+
+        def add_nodes(node: UIWidgetNode):
+            for child in node.children:
+                self.scene.addNode(child)
+                add_nodes(child)
+
+        add_nodes(self.ui_tree_root)
+
+    # ---------- 控件创建 ----------
+
+    def requestCreateWidget(self, bbox_percent):
+        """由场景调用，弹出对话框并创建控件"""
+        if not self.scene.current_pixmap:
+            return
+        selected_template = self.template_list.currentItem()
+        if not selected_template:
+            QMessageBox.information(self, "提示", "请先选择一个模板")
+            return
+        template_id = selected_template.data(Qt.UserRole)
+        template = template_manager.get_template(template_id)
+        name, ok = QInputDialog.getText(
+            self, "控件名称", "请输入控件名:", text=template.display_name
+        )
+        if not ok or not name:
+            name = template.display_name
+
+        node = UIWidgetNode(name, template_id, bbox_percent)
+        node.parent = self.ui_tree_root
+        self.ui_tree_root.children.append(node)
+
+        self.tree_model.layoutChanged.emit()
+        self.scene.addNode(node)
+        self.select_node_in_tree(node)
+
+    def select_node_in_tree(self, node: UIWidgetNode):
+        """在树视图中选中指定节点"""
+
+        def find_idx(parent_idx: QModelIndex, target_node):
+            for row in range(self.tree_model.rowCount(parent_idx)):
+                idx = self.tree_model.index(row, 0, parent_idx)
+                n = self.tree_model.getNode(idx)
+                if n == target_node:
+                    return idx
+                child_idx = find_idx(idx, target_node)
+                if child_idx.isValid():
+                    return child_idx
+            return QModelIndex()
+
+        idx = find_idx(QModelIndex(), node)
+        if idx.isValid():
+            self.tree_view.setCurrentIndex(idx)
+            self.tree_view.expand(idx)
+
+    # ---------- 节点选中/编辑 ----------
+
+    def on_node_selected(self, selected, deselected):
+        """树选中项改变"""
+        indexes = selected.indexes()
+        if indexes:
+            idx = indexes[0]
+            node = self.tree_model.getNode(idx)
+            if node and node != self.ui_tree_root:
+                self.show_node_properties(node)
+                for rid, ritem in self.scene.rect_items.items():
+                    ritem.setSelected(ritem.node.id == node.id)
+            else:
+                self.clear_property_panel()
+
+    def show_node_properties(self, node: UIWidgetNode):
+        """在属性面板中显示节点信息"""
+        self.prop_name_edit.setText(node.name)
+        template = template_manager.get_template(node.template_id)
+        if template:
+            idx = self.prop_template_combo.findData(node.template_id)
+            if idx >= 0:
+                self.prop_template_combo.setCurrentIndex(idx)
+        x, y, w, h = node.bbox
+        self.prop_x.setValue(x)
+        self.prop_y.setValue(y)
+        self.prop_w.setValue(w)
+        self.prop_h.setValue(h)
+
+    def clear_property_panel(self):
+        """清空属性面板"""
+        self.prop_name_edit.clear()
+        self.prop_x.setValue(0)
+        self.prop_y.setValue(0)
+        self.prop_w.setValue(0)
+        self.prop_h.setValue(0)
+
+    def update_current_node(self):
+        """用属性面板的值更新当前选中节点"""
+        idx = self.tree_view.currentIndex()
+        if not idx.isValid():
+            return
+        node = self.tree_model.getNode(idx)
+        if node and node != self.ui_tree_root:
+            node.name = self.prop_name_edit.text()
+            node.template_id = self.prop_template_combo.currentData()
+            node.bbox = (
+                self.prop_x.value(),
+                self.prop_y.value(),
+                self.prop_w.value(),
+                self.prop_h.value(),
+            )
+            if node.id in self.scene.rect_items:
+                self.scene.rect_items[node.id].updateGeometry()
+            self.tree_model.dataChanged.emit(idx, idx)
+            self.on_node_updated(node)
+
+    def on_node_updated(self, node: UIWidgetNode):
+        """节点更新回调（可扩展）"""
+        pass
+
+    # ---------- 保存 / 加载 ----------
+
+    def save_structure(self):
+        """保存标注结构到JSON文件"""
+        if not self.current_image_path:
+            QMessageBox.warning(self, "警告", "请先打开图片")
+            return
+        data = {"image_path": self.current_image_path, "tree": self.ui_tree_root.to_dict()}
+        path, _ = QFileDialog.getSaveFileName(self, "保存结构", "", "JSON (*.json)")
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "成功", "结构已保存")
+
+    def load_structure(self):
+        """从JSON文件加载标注结构"""
+        path, _ = QFileDialog.getOpenFileName(self, "加载结构", "", "JSON (*.json)")
+        if not path:
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # 加载图片
+        img_path = data.get("image_path")
+        if img_path:
+            pixmap = QPixmap(img_path)
+            if not pixmap.isNull():
+                self.current_image_path = img_path
+                self.scene.setImage(pixmap)
+                self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+
+        # 重建树
+        self.ui_tree_root = UIWidgetNode("Root", "", (0, 0, 1, 1))
+        for child_data in data["tree"]["children"]:
+            child_node = UIWidgetNode.from_dict(child_data, self.ui_tree_root)
+            self.ui_tree_root.children.append(child_node)
+        self.tree_model = WidgetTreeModel(self.ui_tree_root)
+        self.tree_view.setModel(self.tree_model)
+        self.rebuild_scene_rects()
+        QMessageBox.information(self, "成功", "结构已加载")
+
+    # ---------- 层级过滤 ----------
+
+    def show_only_current_level(self):
+        """只显示与当前选中节点同一层级的节点"""
+        current_idx = self.tree_view.currentIndex()
+        if not current_idx.isValid():
+            return
+        current_node = self.tree_model.getNode(current_idx)
+        if current_node == self.ui_tree_root:
+            return
+        depth = self.get_node_depth(current_node)
+        self.filter_tree_by_depth(depth)
+
+    def go_up_one_level(self):
+        """显示上一层级（深度减1）"""
+        if self.current_filter_depth is None:
+            idx = self.tree_view.currentIndex()
+            if idx.isValid():
+                node = self.tree_model.getNode(idx)
+                depth = self.get_node_depth(node)
+                self.filter_tree_by_depth(depth - 1)
+            else:
+                self.filter_tree_by_depth(0)
+        else:
+            new_depth = self.current_filter_depth - 1
+            if new_depth >= 0:
+                self.filter_tree_by_depth(new_depth)
+            else:
+                self.reset_level_filter()
+
+    def reset_level_filter(self):
+        """重置层级过滤，显示全部"""
+        self.current_filter_depth = None
+        self.tree_view.setModel(self.tree_model)
+        self.tree_view.expandAll()
+
+    def filter_tree_by_depth(self, depth: int):
+        """构建一个只显示指定深度节点的临时模型"""
+        self.current_filter_depth = depth
+        filtered_root = UIWidgetNode("FilteredRoot", "", (0, 0, 1, 1))
+
+        def copy_node_with_depth(
+            node: UIWidgetNode, current_depth: int, target_depth: int, parent_copy
+        ):
+            if current_depth == target_depth:
+                copy = UIWidgetNode(node.name, node.template_id, node.bbox)
+                copy.id = node.id
+                copy.props = node.props.copy()
+                copy.parent = parent_copy
+                parent_copy.children.append(copy)
+            elif current_depth < target_depth:
+                for child in node.children:
+                    copy_node_with_depth(child, current_depth + 1, target_depth, parent_copy)
+
+        for child in self.ui_tree_root.children:
+            copy_node_with_depth(child, 1, depth, filtered_root)
+
+        filtered_model = WidgetTreeModel(filtered_root)
+        self.tree_view.setModel(filtered_model)
+
+    @staticmethod
+    def get_node_depth(node: UIWidgetNode) -> int:
+        """计算节点深度"""
+        depth = 0
+        cur = node
+        while cur.parent and cur.parent.parent:  # 不算Root本身
+            depth += 1
+            cur = cur.parent
+        return depth + 1  # 根的直接孩子深度为1

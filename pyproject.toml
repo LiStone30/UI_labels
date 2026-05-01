@@ -1,0 +1,12 @@
+[project]
+name = "ui-labels"
+version = "0.1.0"
+description = "UI逆向标注工具 - 在图片上标注UI控件"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pyside6>=6.11.0",
+]
+
+[project.scripts]
+ui-labels = "ui_labels.__main__:main"
