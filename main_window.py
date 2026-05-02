@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QInputDialog,
+    QMenu,
     QToolBar,
     QStatusBar,
 )
@@ -299,6 +300,10 @@ class MainWindow(QMainWindow):
         if parent is None:
             logger.warning("delete_node() -> cannot delete root node")
             return
+
+        self.tree_view.selectionModel().blockSignals(True)
+        self.tree_view.setCurrentIndex(QModelIndex())
+
         row = parent.children.index(node)
         if parent == self.ui_tree_root:
             parent_idx = QModelIndex()
@@ -310,8 +315,10 @@ class MainWindow(QMainWindow):
         self.tree_model.endRemoveRows()
         if node.id in self.scene.rect_items:
             rect_item = self.scene.rect_items.pop(node.id)
+            rect_item.setVisible(False)
             self.scene.removeItem(rect_item)
         self.clear_property_panel()
+        self.tree_view.selectionModel().blockSignals(False)
         logger.info(f"delete_node() -> node deleted successfully")
 
     def show_node_properties(self, node: UIWidgetNode):
