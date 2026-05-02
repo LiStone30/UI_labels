@@ -89,6 +89,8 @@ class MainWindow(QMainWindow):
         self.tree_view.setAcceptDrops(True)
         self.tree_view.setDropIndicatorShown(True)
         self.tree_view.setDragDropMode(QTreeView.InternalMove)
+        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self.on_tree_context_menu)
         right_dock.setWidget(self.tree_view)
         self.addDockWidget(Qt.RightDockWidgetArea, right_dock)
 
@@ -276,6 +278,42 @@ class MainWindow(QMainWindow):
                 logger.info(f"on_node_selected() -> node is None or is root, calling clear_property_panel")
                 self.clear_property_panel()
 
+    def on_tree_context_menu(self, pos):
+        """右键菜单"""
+        idx = self.tree_view.indexAt(pos)
+        if not idx.isValid():
+            return
+        node = self.tree_model.getNode(idx)
+        if node is None or node == self.ui_tree_root:
+            return
+        menu = QMenu()
+        delete_action = menu.addAction("删除节点")
+        action = menu.exec(self.tree_view.viewport().mapToGlobal(pos))
+        if action == delete_action:
+            self.delete_node(node)
+
+    def delete_node(self, node: UIWidgetNode):
+        """删除节点"""
+        logger.info(f"delete_node() -> deleting node: {node.name}, id={node.id}")
+        parent = node.parent
+        if parent is None:
+            logger.warning("delete_node() -> cannot delete root node")
+            return
+        row = parent.children.index(node)
+        if parent == self.ui_tree_root:
+            parent_idx = QModelIndex()
+        else:
+            parent_row = parent.parent.children.index(parent) if parent.parent else 0
+            parent_idx = self.tree_model.createIndex(parent_row, 0, parent)
+        self.tree_model.beginRemoveRows(parent_idx, row, row)
+        parent.children.remove(node)
+        self.tree_model.endRemoveRows()
+        if node.id in self.scene.rect_items:
+            rect_item = self.scene.rect_items.pop(node.id)
+            self.scene.removeItem(rect_item)
+        self.clear_property_panel()
+        logger.info(f"delete_node() -> node deleted successfully")
+
     def show_node_properties(self, node: UIWidgetNode):
         """在属性面板中显示节点信息"""
         logger.info(f"show_node_properties() -> node.name={node.name}, node.template_id={node.template_id}")
@@ -340,11 +378,11 @@ class MainWindow(QMainWindow):
         if not self.current_image_path:
             QMessageBox.warning(self, "警告", "请先打开图片")
             return
-        data = {"image_path": self.current_image_path, "tree": self.ui_tree_root.to_dict()}
+        from models.data_schema import structure_to_schema, save_structure_to_json
+        schema = structure_to_schema(self.current_image_path, self.ui_tree_root)
         path, _ = QFileDialog.getSaveFileName(self, "保存结构", "", "JSON (*.json)")
         if path:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            save_structure_to_json(schema, path)
             QMessageBox.information(self, "成功", "结构已保存")
 
     def load_structure(self):
@@ -352,19 +390,18 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "加载结构", "", "JSON (*.json)")
         if not path:
             return
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        from models.data_schema import load_structure_from_json, schema_to_structure
+        
+        # 加载并验证数据
+        schema = load_structure_from_json(path)
+        img_path, self.ui_tree_root = schema_to_structure(schema)
 
         # 先清空旧数据
         for rect_item in list(self.scene.rect_items.values()):
             self.scene.removeItem(rect_item)
         self.scene.rect_items.clear()
 
-        # 重建树
-        self.ui_tree_root = UIWidgetNode("Root", "", (0, 0, 1, 1))
-        for child_data in data["tree"]["children"]:
-            child_node = UIWidgetNode.from_dict(child_data, self.ui_tree_root)
-            self.ui_tree_root.children.append(child_node)
+        # 重建树模型
         self.tree_model = WidgetTreeModel(self.ui_tree_root)
         try:
             self.tree_view.selectionModel().selectionChanged.disconnect(self.on_node_selected)
@@ -374,7 +411,6 @@ class MainWindow(QMainWindow):
         self.tree_view.selectionModel().selectionChanged.connect(self.on_node_selected)
 
         # 加载图片
-        img_path = data.get("image_path")
         if img_path:
             pixmap = QPixmap(img_path)
             if not pixmap.isNull():
