@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from models import UIWidgetNode, template_manager, TemplateManager, Template
 from graphics import ImageScene, ResizableRectItem
 from tree_model import WidgetTreeModel
+from logger import logger
 
 
 class MainWindow(QMainWindow):
@@ -43,6 +44,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("UI逆向标注工具")
         self.resize(1200, 800)
+        logger.info("MainWindow initialized")
 
         # 数据
         self.current_image_path: Optional[str] = None
@@ -256,25 +258,43 @@ class MainWindow(QMainWindow):
 
     def on_node_selected(self, selected, deselected):
         """树选中项改变"""
+        logger.info(f"on_node_selected() -> called, selected={selected}, deselected={deselected}")
         indexes = selected.indexes()
+        logger.info(f"on_node_selected() -> indexes count: {len(indexes)}")
         if indexes:
             idx = indexes[0]
+            logger.info(f"on_node_selected() -> idx={idx}, idx.isValid()={idx.isValid()}")
             node = self.tree_model.getNode(idx)
+            logger.info(f"on_node_selected() -> node={node}, node.name={node.name if node else 'None'}")
+            logger.info(f"on_node_selected() -> self.ui_tree_root={self.ui_tree_root}")
             if node and node != self.ui_tree_root:
+                logger.info(f"on_node_selected() -> calling show_node_properties")
                 self.show_node_properties(node)
                 for rid, ritem in self.scene.rect_items.items():
                     ritem.setSelected(ritem.node.id == node.id)
             else:
+                logger.info(f"on_node_selected() -> node is None or is root, calling clear_property_panel")
                 self.clear_property_panel()
 
     def show_node_properties(self, node: UIWidgetNode):
         """在属性面板中显示节点信息"""
+        logger.info(f"show_node_properties() -> node.name={node.name}, node.template_id={node.template_id}")
         self.prop_name_edit.setText(node.name)
         template = template_manager.get_template(node.template_id)
+        logger.info(f"show_node_properties() -> template lookup: template_manager.get_template('{node.template_id}') = {template}")
         if template:
-            idx = self.prop_template_combo.findData(node.template_id)
+            idx = self.prop_template_combo.findData(template.id)
+            logger.info(f"show_node_properties() -> combo idx by data({template.id}): {idx}")
             if idx >= 0:
                 self.prop_template_combo.setCurrentIndex(idx)
+            else:
+                idx_text = self.prop_template_combo.findText(template.display_name)
+                logger.info(f"show_node_properties() -> combo idx by text({template.display_name}): {idx_text}")
+                if idx_text >= 0:
+                    self.prop_template_combo.setCurrentIndex(idx_text)
+        else:
+            logger.warning(f"show_node_properties() -> template not found for node.template_id={node.template_id}")
+            logger.info(f"show_node_properties() -> available templates: {[t.id for t in template_manager.get_all()]}")
         x, y, w, h = node.bbox
         self.prop_x.setValue(x)
         self.prop_y.setValue(y)
@@ -335,6 +355,24 @@ class MainWindow(QMainWindow):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        # 先清空旧数据
+        for rect_item in list(self.scene.rect_items.values()):
+            self.scene.removeItem(rect_item)
+        self.scene.rect_items.clear()
+
+        # 重建树
+        self.ui_tree_root = UIWidgetNode("Root", "", (0, 0, 1, 1))
+        for child_data in data["tree"]["children"]:
+            child_node = UIWidgetNode.from_dict(child_data, self.ui_tree_root)
+            self.ui_tree_root.children.append(child_node)
+        self.tree_model = WidgetTreeModel(self.ui_tree_root)
+        try:
+            self.tree_view.selectionModel().selectionChanged.disconnect(self.on_node_selected)
+        except Exception:
+            pass
+        self.tree_view.setModel(self.tree_model)
+        self.tree_view.selectionModel().selectionChanged.connect(self.on_node_selected)
+
         # 加载图片
         img_path = data.get("image_path")
         if img_path:
@@ -344,13 +382,7 @@ class MainWindow(QMainWindow):
                 self.scene.setImage(pixmap)
                 self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
-        # 重建树
-        self.ui_tree_root = UIWidgetNode("Root", "", (0, 0, 1, 1))
-        for child_data in data["tree"]["children"]:
-            child_node = UIWidgetNode.from_dict(child_data, self.ui_tree_root)
-            self.ui_tree_root.children.append(child_node)
-        self.tree_model = WidgetTreeModel(self.ui_tree_root)
-        self.tree_view.setModel(self.tree_model)
+        # 重建场景矩形
         self.rebuild_scene_rects()
         QMessageBox.information(self, "成功", "结构已加载")
 
@@ -389,6 +421,7 @@ class MainWindow(QMainWindow):
         self.current_filter_depth = None
         self.tree_view.setModel(self.tree_model)
         self.tree_view.expandAll()
+        self.scene.clearFilter()
 
     def filter_tree_by_depth(self, depth: int):
         """构建一个只显示指定深度节点的临时模型"""
@@ -412,7 +445,14 @@ class MainWindow(QMainWindow):
             copy_node_with_depth(child, 1, depth, filtered_root)
 
         filtered_model = WidgetTreeModel(filtered_root)
+        try:
+            self.tree_view.selectionModel().selectionChanged.disconnect(self.on_node_selected)
+        except Exception:
+            pass
         self.tree_view.setModel(filtered_model)
+        self.tree_view.selectionModel().selectionChanged.connect(self.on_node_selected)
+
+        self.scene.filterByDepth(depth, self.ui_tree_root)
 
     @staticmethod
     def get_node_depth(node: UIWidgetNode) -> int:
