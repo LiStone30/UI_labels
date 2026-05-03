@@ -231,6 +231,7 @@ class MainWindow(QMainWindow):
             name = template.display_name
 
         node = UIWidgetNode(name, template_id, bbox_percent)
+        node.props = template.default_props.copy()
         node.parent = self.ui_tree_root
         self.ui_tree_root.children.append(node)
 

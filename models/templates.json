@@ -1,0 +1,128 @@
+[
+  {
+    "id": "Button",
+    "name": "Button",
+    "display_name": "按钮",
+    "default_props": {
+      "text": "按钮",
+      "enabled": true,
+      "onClickAction": ""
+    }
+  },
+  {
+    "id": "Label",
+    "name": "Label",
+    "display_name": "标签",
+    "default_props": {
+      "text": "标签",
+      "font_size": 14,
+      "color": "#333333"
+    }
+  },
+  {
+    "id": "Logo",
+    "name": "Logo",
+    "display_name": "logo",
+    "default_props": {
+      "text": "logo",
+      "font_size": 14,
+      "color": "#1E90FF"
+    }
+  },
+  {
+    "id": "EditText",
+    "name": "EditText",
+    "display_name": "输入框",
+    "default_props": {
+      "placeholder": "请输入",
+      "text": "",
+      "maxLength": 255
+    }
+  },
+  {
+    "id": "CheckBox",
+    "name": "CheckBox",
+    "display_name": "复选框",
+    "default_props": {
+      "text": "复选框",
+      "checked": false
+    }
+  },
+  {
+    "id": "RadioButton",
+    "name": "RadioButton",
+    "display_name": "单选框",
+    "default_props": {
+      "group": "",
+      "text": "单选框",
+      "selected": false
+    }
+  },
+  {
+    "id": "Switch",
+    "name": "Switch",
+    "display_name": "开关",
+    "default_props": {
+      "onText": "开",
+      "offText": "关",
+      "value": false
+    }
+  },
+  {
+    "id": "Slider",
+    "name": "Slider",
+    "display_name": "滑块",
+    "default_props": {
+      "min": 0,
+      "max": 100,
+      "currentValue": 50
+    }
+  },
+  {
+    "id": "ImageView",
+    "name": "ImageView",
+    "display_name": "图片视图",
+    "default_props": {
+      "src": "",
+      "scaleType": "centerCrop"
+    }
+  },
+  {
+    "id": "ListView",
+    "name": "ListView",
+    "display_name": "列表",
+    "default_props": {
+      "itemTemplate": "",
+      "dataSource": ""
+    }
+  },
+  {
+    "id": "Container",
+    "name": "Container",
+    "display_name": "容器",
+    "default_props": {
+      "layout": "vertical",
+      "children": []
+    }
+  },
+  {
+    "id": "Panel",
+    "name": "Panel",
+    "display_name": "折叠面板",
+    "default_props": {
+      "title": "面板",
+      "expanded": true,
+      "collapsedHeight": 0
+    }
+  },
+  {
+    "id": "Dialog",
+    "name": "Dialog",
+    "display_name": "弹窗",
+    "default_props": {
+      "title": "提示",
+      "buttons": ["确定"],
+      "visible": false
+    }
+  }
+]
