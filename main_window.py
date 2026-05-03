@@ -29,6 +29,9 @@ from PySide6.QtWidgets import (
     QMenu,
     QToolBar,
     QStatusBar,
+    QScrollArea,
+    QCheckBox,
+    QSpinBox,
 )
 
 
@@ -145,8 +148,18 @@ class MainWindow(QMainWindow):
 
         prop_group.setLayout(prop_layout)
 
+        # 动态属性编辑区域
+        self.props_scroll = QScrollArea()
+        self.props_scroll.setWidgetResizable(True)
+        self.props_scroll.setMinimumHeight(150)
+        self.props_container = QWidget()
+        self.props_layout = QFormLayout(self.props_container)
+        self.props_widgets = {}
+        self.props_scroll.setWidget(self.props_container)
+
         bottom_layout.addWidget(template_group)
         bottom_layout.addWidget(prop_group)
+        bottom_layout.addWidget(self.props_scroll)
 
         # 使用状态栏，但不覆盖底部dock，用setStatusBar替代
         # 这里我们将bottom_widget放到一个dock中
@@ -346,6 +359,54 @@ class MainWindow(QMainWindow):
         self.prop_y.setValue(y)
         self.prop_w.setValue(w)
         self.prop_h.setValue(h)
+        self._build_props_widgets(node)
+
+    def _build_props_widgets(self, node: UIWidgetNode):
+        """根据节点模板动态构建属性控件"""
+        while self.props_layout.count():
+            child = self.props_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self.props_widgets.clear()
+
+        template = template_manager.get_template(node.template_id)
+        if not template:
+            return
+
+        for key, value in template.default_props.items():
+            if isinstance(value, bool):
+                widget = QCheckBox()
+                widget.setChecked(node.props.get(key, value))
+                widget.stateChanged.connect(lambda state, k=key: self._on_prop_changed(k, state == 2))
+            elif isinstance(value, int):
+                widget = QSpinBox()
+                widget.setRange(-2147483648, 2147483647)
+                widget.setValue(node.props.get(key, value))
+                widget.valueChanged.connect(lambda val, k=key: self._on_prop_changed(k, val))
+            elif isinstance(value, float):
+                widget = QDoubleSpinBox()
+                widget.setRange(-2147483648, 2147483647)
+                widget.setDecimals(6)
+                widget.setValue(node.props.get(key, value))
+                widget.valueChanged.connect(lambda val, k=key: self._on_prop_changed(k, val))
+            elif isinstance(value, str):
+                widget = QLineEdit()
+                widget.setText(node.props.get(key, value))
+                widget.textChanged.connect(lambda text, k=key: self._on_prop_changed(k, text))
+            elif isinstance(value, list):
+                widget = QLineEdit()
+                widget.setText(", ".join(map(str, node.props.get(key, value))))
+                widget.textChanged.connect(lambda text, k=key: self._on_prop_changed(k, [v.strip() for v in text.split(",")] if text else []))
+            else:
+                widget = QLineEdit()
+                widget.setText(str(node.props.get(key, value)))
+                widget.textChanged.connect(lambda text, k=key: self._on_prop_changed(k, text))
+            self.props_layout.addRow(f"{key}:", widget)
+            self.props_widgets[key] = widget
+
+    def _on_prop_changed(self, key: str, value):
+        """属性值改变时的回调"""
+        pass
 
     def clear_property_panel(self):
         """清空属性面板"""
@@ -354,6 +415,11 @@ class MainWindow(QMainWindow):
         self.prop_y.setValue(0)
         self.prop_w.setValue(0)
         self.prop_h.setValue(0)
+        while self.props_layout.count():
+            child = self.props_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self.props_widgets.clear()
 
     def update_current_node(self):
         """用属性面板的值更新当前选中节点"""
@@ -370,6 +436,15 @@ class MainWindow(QMainWindow):
                 self.prop_w.value(),
                 self.prop_h.value(),
             )
+            for key, widget in self.props_widgets.items():
+                if isinstance(widget, QCheckBox):
+                    node.props[key] = widget.isChecked()
+                elif isinstance(widget, QSpinBox):
+                    node.props[key] = widget.value()
+                elif isinstance(widget, QDoubleSpinBox):
+                    node.props[key] = widget.value()
+                elif isinstance(widget, QLineEdit):
+                    node.props[key] = widget.text()
             if node.id in self.scene.rect_items:
                 self.scene.rect_items[node.id].updateGeometry()
             self.tree_model.dataChanged.emit(idx, idx)

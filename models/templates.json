@@ -24,7 +24,7 @@
     "name": "Logo",
     "display_name": "logo",
     "default_props": {
-      "text": "logo",
+      "label_text": "logo",
       "font_size": 14,
       "color": "#1E90FF"
     }
