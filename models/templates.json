@@ -6,7 +6,9 @@
     "default_props": {
       "text": "按钮",
       "enabled": true,
-      "onClickAction": ""
+      "onClickAction": "",
+      "disableRule": "",
+      "stateRule": ""
     }
   },
   {
@@ -16,7 +18,11 @@
     "default_props": {
       "text": "标签",
       "font_size": 14,
-      "color": "#333333"
+      "color": "#333333",
+      "enabled": true,
+      "onClickAction": "",
+      "disableRule": "",
+      "stateRule": ""
     }
   },
   {
@@ -27,6 +33,17 @@
       "label_text": "logo",
       "font_size": 14,
       "color": "#1E90FF"
+    }
+  },
+  {
+    "id": "UIState",
+    "name": "UIState",
+    "display_name": "状态标记",
+    "default_props": {
+      "label_text": "状态",
+      "font_size": 14,
+      "color": "#1E90FF",
+      "state_id": ""
     }
   },
   {

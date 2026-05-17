@@ -48,6 +48,8 @@ ui_labels/
     └── resizable_rect.py    # 可拖动缩放的矩形项
 ```
 
+.venv\Scripts\activate
+
 # 有些BUG 目前够用了
 不要拖动画面中的矩形边框，会出BUG
 拖动画面中的矩形边框，属性栏不会更新
